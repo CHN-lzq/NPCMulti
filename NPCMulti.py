@@ -512,137 +512,6 @@ class Bottleneck3(nn.Module):
         out = torch.cat([out,identity],dim=1)
         return out
 
-class newmot10_gpu(nn.Module):
-    def __init__(self,interval,device, img_ch=3, output_ch=3):
-        super(newmot10_gpu, self).__init__()
-        self.device = device
-        self.UNet = bfp_newmot1()
-        self.bat = BAT(1,1312)
-        # self.conv1 = nn.Conv2d(1024,128, kernel_size=3, stride=2, padding=1, bias=True).to(device)
-        self.conv1 = nn.Conv2d(1312,128, kernel_size=3, stride=2, padding=1, bias=True)
-        self.relu2 = nn.ReLU()
-        self.fc3 = nn.Linear(1024, 256)
-        self.fc4 = nn.Linear(256,interval)
-        self.sigmoid = nn.Sigmoid()
-        self.fc2 = nn.Linear(73732, 1024)
-
-        self.Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
-
-        self.Conv1 = DoubleConvBlock(ch_in=img_ch, ch_out=64)
-        self.Conv2 = DoubleConvBlock(ch_in=70, ch_out=128)
-        self.Conv3 = DoubleConvBlock(ch_in=140, ch_out=256)
-        self.Conv4 = DoubleConvBlock(ch_in=296, ch_out=512)
-        self.Conv5 = DoubleConvBlock(ch_in=592, ch_out=1024)
-
-        self.seg_Conv1 = DilatedEncoder3(in_channels=64, num_channels=4, mid_channels=32,out_channels=1, num_residual_blocks=2,
-                       dilations=[3,1])
-        self.seg_Conv2 = DilatedEncoder3(in_channels=128, num_channels=8, mid_channels=64,out_channels=2, num_residual_blocks=2,
-                       dilations=[3,1])
-        self.seg_Conv3 = DilatedEncoder3(in_channels=256, num_channels=32, mid_channels=128,out_channels=4, num_residual_blocks=2,
-                       dilations=[3,1])
-        self.seg_Conv4 = DilatedEncoder3(in_channels=512, num_channels=64, mid_channels=256,out_channels=8, num_residual_blocks=2,
-                       dilations=[3,1])
-        self.seg_Conv5 = DilatedEncoder3(in_channels=1024, num_channels=256, mid_channels=512,out_channels=16, num_residual_blocks=2,
-                       dilations=[3,1])
-    # def runUNet(self,x):
-    #     y = self.UNet(x)
-    #     return y
-    # def seg(self,seg_x1,seg_x2,seg_x3,seg_x4,seg_x5):
-    #     seg_x1 = self.seg_Conv1(seg_x1)
-    #     seg_x2 = self.seg_Conv2(seg_x2)
-    #     seg_x3 = self.seg_Conv3(seg_x3)
-    #     seg_x4 = self.seg_Conv4(seg_x4)
-    #     seg_x5 = self.seg_Conv5(seg_x5)
-    #     return seg_x1,seg_x2,seg_x3,seg_x4,seg_x5
-    def run_model(self, x,clinical_data):
-
-
-        # print(x)
-
-
-        seg_x1,seg_x2,seg_x3,seg_x4, seg_x5,d1 = self.UNet(x)
-        # seg_x1 = seg_x1.to('cpu')
-        # seg_x2 = seg_x2.to('cpu')
-        # seg_x3 = seg_x3.to('cpu')
-        # seg_x4 = seg_x4.to('cpu')
-        # seg_x5 = seg_x5.to('cpu')
-
-        seg_x1 = self.seg_Conv1(seg_x1)
-        seg_x2 = self.seg_Conv2(seg_x2)
-        seg_x3 = self.seg_Conv3(seg_x3)
-        seg_x4 = self.seg_Conv4(seg_x4)
-        seg_x5 = self.seg_Conv5(seg_x5)
-
-        d2 = d1.cpu().detach().numpy()
-        mask = semantic_to_mask(d2, [0,1,2])
-        mask = np.where(mask>=1,1,0)
-        mask1 = np.zeros([x.shape[0],3,256,256])
-        for i in range(x.shape[0]):
-            mask1[i, 0, :, :] = mask[i]
-            mask1[i, 1, :, :] = mask[i]
-            mask1[i, 2, :, :] = mask[i]
-
-
-        xx = x.cpu().detach().numpy()
-        y = np.multiply(xx,mask1)
-        y = y.astype(np.float32)
-        # x = torch.from_numpy(x).to(self.device)
-        y = torch.from_numpy(y)
-        # x = x.to('cpu')
-        # x = torch.cat([x,y],dim = 1)
-        y = y.to(self.device)
-        x1 = self.Conv1(y)
-        x1 = torch.cat([x1,seg_x1],dim=1)
-        # x1 = x1.to('cpu')
-        x2 = self.Maxpool(x1)
-        x2 = self.Conv2(x2)
-        x2 = torch.cat([x2,seg_x2],dim=1)
-        x3 = self.Maxpool(x2)
-        x3 = self.Conv3(x3)
-        x3 = torch.cat([x3,seg_x3],dim=1)
-        x4 = self.Maxpool(x3)
-        x4 = self.Conv4(x4)
-        x4 = torch.cat([x4,seg_x4],dim=1)
-        x5 = self.Maxpool(x4)
-        x5 = self.Conv5(x5)
-        x5 = torch.cat([x5,seg_x5],dim=1)
-        # x5 = torch.cat([x5, seg_feature], dim=1)
-        # x5 = x5.to(self.device)
-        x5 = self.bat(x5)
-        #
-        #
-        #
-        # seg5 = x5.to(self.device1)
-        # seg = self.recover(seg5)
-
-        sur = self.conv1(x5)
-
-        sur = self.Maxpool(sur)
-
-        sur = torch.flatten(sur, 0)
-        # clinical_data = clinical_data.to('cpu')
-        sur = torch.cat((clinical_data, sur), dim=0)
-
-        if sur.shape[0]!= 73732:
-            patches = torch.zeros(size=(73732-sur.shape[0],),dtype=sur.dtype).to(self.device)
-            # patches = torch.zeros(size=(73732 - sur.shape[0],), dtype=sur.dtype)
-            sur = torch.cat((sur,patches),dim=0)
-
-        sur = self.fc2(sur)
-
-        sur = self.relu2(sur)
-        # sur = sur.to(self.device)
-        sur = self.fc3(sur)
-        # sur = self.relu3(sur)
-        sur = self.fc4(sur)
-        sur = self.sigmoid(sur)
-        # sur = sur.to(self.device)
-        return d1, sur
-    def forward(self, x,clinical_data):
-        x = x+torch.zeros(1,dtype=x.dtype,device=x.device,requires_grad=True)
-        clinical_data = clinical_data + torch.zeros(1, dtype=clinical_data.dtype, device=clinical_data.device, requires_grad=True)
-        d1,sur = checkpoint(self.run_model,x,clinical_data)
-        return d1,sur
 
 class NPCMulti(nn.Module):
     def __init__(self,interval,device, img_ch=3, output_ch=3):
@@ -657,7 +526,7 @@ class NPCMulti(nn.Module):
         self.fc3 = nn.Linear(1024, 256)
         self.fc4 = nn.Linear(256,interval)
         self.sigmoid = nn.Sigmoid()
-        self.fc2 = nn.Linear(73732, 1024)
+        self.fc2 = nn.Linear(73728, 1024)
 
         self.Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
 
