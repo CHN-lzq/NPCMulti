@@ -7,12 +7,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 from collections import OrderedDict
-
-
 from models.transformer.net.transformer import transformer
 from util import semantic_to_mask
-
-
 
 class DoubleConvBlock(nn.Module):
     def __init__(self, ch_in, ch_out):
@@ -25,7 +21,6 @@ class DoubleConvBlock(nn.Module):
             nn.BatchNorm2d(ch_out),
             nn.ReLU(inplace=True)
         )
-
     def forward(self, x):
         x = self.conv(x)
         return x
@@ -451,12 +446,6 @@ class DilatedEncoder3(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, feature: torch.Tensor) -> torch.Tensor:
-        # print(' ')
-        # print(feature.shape)
-        # out = self.lateral_norm(self.lateral_conv(feature))
-        # out = self.fpn_norm(self.fpn_conv(out))
-        # print(out.shape)
-        # return self.dilated_encoder_blocks(out)
         x = self.conv1(feature)
         return self.dilated_encoder_blocks(x)
 
@@ -472,30 +461,20 @@ class Bottleneck3(nn.Module):
         super(Bottleneck3, self).__init__()
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, kernel_size=1, padding=0),
-            # norm_type(mid_channels),
-            # act_type(act_type)
         )
         self.conv2 = nn.Sequential(
             nn.Conv2d(mid_channels, mid_channels,
                       kernel_size=3, padding=dilation, dilation=dilation),
-            # norm_type(mid_channels),
-            # act_type(act_type)
         )
         self.conv3 = nn.Sequential(
             nn.Conv2d(mid_channels, mid_channels,kernel_size=5, padding=dilation*2, dilation=dilation),
-            # norm_type(mid_channels),
-            # act_type(act_type)
         )
         self.conv4 = nn.Sequential(
             nn.Conv2d(mid_channels, mid_channels,
                       kernel_size=3, padding=dilation, dilation=dilation),
-            # norm_type(mid_channels),
-            # act_type(act_type)
         )
         self.conv5 = nn.Sequential(
             nn.Conv2d(mid_channels, out_channels, kernel_size=1, padding=0),
-            # norm_type(in_channels),
-            # act_type(act_type)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -506,12 +485,9 @@ class Bottleneck3(nn.Module):
         out = self.conv3(out)
         out = self.conv4(out)
         out = self.conv5(out)
-        # out = out + identity
 
         out = torch.cat([out,identity],dim=1)
         return out
-
-
 
 class NPCMulti(nn.Module):
     def __init__(self,interval,device, img_ch=3, output_ch=3):
@@ -520,7 +496,6 @@ class NPCMulti(nn.Module):
 
         self.UNet = bfp_newmot1()
         self.transformer = transformer(1,1312)
-        # self.conv1 = nn.Conv2d(1024,128, kernel_size=3, stride=2, padding=1, bias=True).to(device)
         self.conv1 = nn.Conv2d(1312,128, kernel_size=3, stride=2, padding=1, bias=True)
         self.relu2 = nn.ReLU().to(device)
         self.fc3 = nn.Linear(1024, 256)
@@ -547,13 +522,7 @@ class NPCMulti(nn.Module):
         self.seg_Conv5 = DilatedEncoder3(in_channels=1024, num_channels=256, mid_channels=512,out_channels=16, num_residual_blocks=2,
                        dilations=[3,1])
     def forward(self, x):
-
-
-        # print(x)
-
-
         seg_x1,seg_x2,seg_x3,seg_x4, seg_x5,d1 = self.UNet(x)
-
         seg_x1 = self.seg_Conv1(seg_x1)
         seg_x2 = self.seg_Conv2(seg_x2)
         seg_x3 = self.seg_Conv3(seg_x3)
@@ -569,73 +538,45 @@ class NPCMulti(nn.Module):
             mask1[i, 1, :, :] = mask[i]
             mask1[i, 2, :, :] = mask[i]
 
-
         xx = x.cpu().detach().numpy()
         y = np.multiply(xx,mask1)
         y = y.astype(np.float32)
-        # x = torch.from_numpy(x).to(self.device)
+
         y = torch.from_numpy(y)
-        # x = x.to('cpu')
-        # x = torch.cat([x,y],dim = 1)
+
         y = y.to(self.device)
         x1 = self.Conv1(y)
         x1 = torch.cat([x1,seg_x1],dim=1)
-        # x1 = x1.to('cpu')
+
         x2 = self.Maxpool(x1)
         x2 = self.Conv2(x2)
         x2 = torch.cat([x2,seg_x2],dim=1)
+        
         x3 = self.Maxpool(x2)
         x3 = self.Conv3(x3)
         x3 = torch.cat([x3,seg_x3],dim=1)
+        
         x4 = self.Maxpool(x3)
         x4 = self.Conv4(x4)
         x4 = torch.cat([x4,seg_x4],dim=1)
+        
         x5 = self.Maxpool(x4)
         x5 = self.Conv5(x5)
         x5 = torch.cat([x5,seg_x5],dim=1)
-        # x5 = torch.cat([x5, seg_feature], dim=1)
+
         x5 = x5.to(self.device)
         x5 = self.transformer(x5)
-        #
-        #
-        #
-        # seg5 = x5.to(self.device1)
-        # seg = self.recover(seg5)
+
 
         sur = self.conv1(x5)
-
         sur = self.Maxpool(sur)
-
         sur = torch.flatten(sur, 0)
-
-
         if sur.shape[0]!= 73728:
             patches = torch.zeros(size=(73728-sur.shape[0],),dtype=sur.dtype).to(self.device)
-
             sur = torch.cat((sur,patches),dim=0)
-
         sur = self.fc2(sur)
-
         sur = self.relu2(sur)
-        # sur = sur.to(self.device)
         sur = self.fc3(sur)
-        # sur = self.relu3(sur)
         sur = self.fc4(sur)
         sur = self.sigmoid(sur)
-        # sur = sur.to(self.device)
         return d1, sur
-
-
-if __name__ == '__main__':
-    k = 2
-    # device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    criterion = nn.CrossEntropyLoss()
-    device = torch.device('cpu')
-    clinical_data = torch.rand(4, ).to(device)
-    net = NPCMulti(18,device)
-    net = net.to(device)
-
-    img = torch.rand(k, 3, 256, 256,dtype=torch.float32).to(device)
-    x = net(img)
-    # x = net(img,clinical_data)
-    print(x[1].shape)
